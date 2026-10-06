@@ -8,65 +8,65 @@ from rembg import new_session, remove
 
 app = Flask(__name__)
 
-# Single thread optimization for low RAM
+# Single Thread + Disable Mem Arena (RAM 512MB ke andar rakhne ke liye)
 opts = ort.SessionOptions()
 opts.intra_op_num_threads = 1
 opts.inter_op_num_threads = 1
-session = new_session('u2netp', providers=['CPUExecutionProvider'], sess_opts=opts)
+opts.enable_cpu_mem_arena = False
 
-# Natural Field / Ground Color Themes (Offline - Zero Network Lag)
-THEMES = [
-    ((110, 139, 61), (194, 178, 128)),   # Khet Green + Mitti Ground
-    ((76, 115, 60), (142, 126, 92)),     # Forest Green + Path
-    ((130, 140, 80), (210, 180, 140)),   # Sunny Crop Field
-    ((90, 120, 70), (160, 140, 110)),    # Garden Outdoor
-]
+# u2netp lightweight model (Sirf 4MB size - zero crash)
+session = new_session(
+    'u2netp', providers=['CPUExecutionProvider'], sess_opts=opts
+)
+
 
 @app.route('/')
 def home():
-    return "Server Live & Active"
+  return 'Server Live & Active'
+
 
 @app.route('/change-bg', methods=['POST'])
 def change_background():
-    try:
-        img_data = request.data
-        if not img_data:
-            return "No data", 400
+  try:
+    img_data = request.data
+    if not img_data:
+      return 'No photo data', 400
 
-        # 1. Input Image ko resize karein
-        input_img = Image.open(io.BytesIO(img_data)).convert('RGB')
-        small_img = input_img.resize((300, 300))
-        del input_img
-        gc.collect()
+    # 1. Image ko 260px par process karein taaki RAM spike na ho
+    input_img = Image.open(io.BytesIO(img_data)).convert('RGB')
+    small_img = input_img.resize((260, 260))
+    del input_img
+    gc.collect()
 
-        # 2. AI Cutout
-        cutout = remove(small_img, session=session).convert('RGBA')
-        cutout = cutout.resize((512, 512), Image.Resampling.BILINEAR)
-        del small_img
-        gc.collect()
+    # 2. Fast Cutout
+    cutout_small = remove(small_img, session=session).convert('RGBA')
+    cutout = cutout_small.resize((512, 512), Image.Resampling.BILINEAR)
+    del small_img, cutout_small
+    gc.collect()
 
-        # 3. Fast Canvas Background (No external download delay)
-        bg = Image.new('RGBA', (512, 512), (135, 206, 235, 255)) # Sky
-        draw = ImageDraw.Draw(bg)
-        draw.rectangle([0, 260, 512, 512], fill=(107, 142, 35, 255)) # Ground
-        
-        # 4. Composite & Export
-        bg.paste(cutout, (0, 0), cutout)
-        final_img = bg.convert('RGB')
-        del cutout, bg
-        gc.collect()
+    # 3. Canvas Background (No Internet Lag)
+    bg = Image.new('RGBA', (512, 512), (135, 206, 235, 255))
+    draw = ImageDraw.Draw(bg)
+    draw.rectangle([0, 260, 512, 512], fill=(107, 142, 35, 255))
 
-        out_io = io.BytesIO()
-        final_img.save(out_io, format='JPEG', quality=80)
-        out_io.seek(0)
-        del final_img
-        gc.collect()
+    # 4. Merge
+    bg.paste(cutout, (0, 0), cutout)
+    final_output = bg.convert('RGB')
+    del cutout, bg
+    gc.collect()
 
-        return send_file(out_io, mimetype='image/jpeg')
+    out_io = io.BytesIO()
+    final_output.save(out_io, format='JPEG', quality=80)
+    out_io.seek(0)
+    del final_output
+    gc.collect()
 
-    except Exception as e:
-        return str(e), 500
+    return send_file(out_io, mimetype='image/jpeg')
+
+  except Exception as e:
+    return str(e), 500
+
 
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
+  port = int(os.environ.get('PORT', 10000))
+  app.run(host='0.0.0.0', port=port)
