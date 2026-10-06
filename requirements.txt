@@ -1,5 +1,5 @@
 flask
 gunicorn
-mediapipe==0.10.14
+mediapipe==26.2.1
 pillow
 numpy
