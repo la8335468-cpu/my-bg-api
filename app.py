@@ -1,23 +1,15 @@
-import gc
 import io
 import os
 from flask import Flask, request, send_file
-import onnxruntime as ort
+import mediapipe as mp
+import numpy as np
 from PIL import Image, ImageDraw
-from rembg import new_session, remove
 
 app = Flask(__name__)
 
-# Single Thread + Disable Mem Arena (RAM 512MB ke andar rakhne ke liye)
-opts = ort.SessionOptions()
-opts.intra_op_num_threads = 1
-opts.inter_op_num_threads = 1
-opts.enable_cpu_mem_arena = False
-
-# u2netp lightweight model (Sirf 4MB size - zero crash)
-session = new_session(
-    'u2netp', providers=['CPUExecutionProvider'], sess_opts=opts
-)
+# Google MediaPipe Lightweight Engine (RAM ~60MB)
+mp_selfie_segmentation = mp.solutions.selfie_segmentation
+segmentor = mp_selfie_segmentation.SelfieSegmentation(model_selection=1)
 
 
 @app.route('/')
@@ -30,36 +22,33 @@ def change_background():
   try:
     img_data = request.data
     if not img_data:
-      return 'No photo data', 400
+      return 'No image data', 400
 
-    # 1. Image ko 260px par process karein taaki RAM spike na ho
-    input_img = Image.open(io.BytesIO(img_data)).convert('RGB')
-    small_img = input_img.resize((260, 260))
-    del input_img
-    gc.collect()
+    # 1. 512x512 Image Load
+    input_image = (
+        Image.open(io.BytesIO(img_data)).convert('RGB').resize((512, 512))
+    )
+    img_np = np.array(input_image)
 
-    # 2. Fast Cutout
-    cutout_small = remove(small_img, session=session).convert('RGBA')
-    cutout = cutout_small.resize((512, 512), Image.Resampling.BILINEAR)
-    del small_img, cutout_small
-    gc.collect()
+    # 2. Fast Human Cutout
+    results = segmentor.process(img_np)
+    mask = results.segmentation_mask > 0.4
 
-    # 3. Canvas Background (No Internet Lag)
-    bg = Image.new('RGBA', (512, 512), (135, 206, 235, 255))
-    draw = ImageDraw.Draw(bg)
-    draw.rectangle([0, 260, 512, 512], fill=(107, 142, 35, 255))
+    # 3. Canvas Ground + Sky Background
+    bg_image = Image.new('RGB', (512, 512), (135, 206, 235))
+    draw = ImageDraw.Draw(bg_image)
+    draw.rectangle([0, 260, 512, 512], fill=(107, 142, 35))
+    bg_np = np.array(bg_image)
 
-    # 4. Merge
-    bg.paste(cutout, (0, 0), cutout)
-    final_output = bg.convert('RGB')
-    del cutout, bg
-    gc.collect()
+    # 4. Blend Person with New Background
+    condition = np.stack((mask,) * 3, axis=-1)
+    output_np = np.where(condition, img_np, bg_np)
 
+    # 5. Output Response
+    output_img = Image.fromarray(output_np)
     out_io = io.BytesIO()
-    final_output.save(out_io, format='JPEG', quality=80)
+    output_img.save(out_io, format='JPEG', quality=85)
     out_io.seek(0)
-    del final_output
-    gc.collect()
 
     return send_file(out_io, mimetype='image/jpeg')
 
