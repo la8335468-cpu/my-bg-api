@@ -1,30 +1,25 @@
 import gc
 import io
 import os
-import random
 from flask import Flask, request, send_file
 import onnxruntime as ort
-from PIL import Image
+from PIL import Image, ImageDraw
 from rembg import new_session, remove
-import requests
 
 app = Flask(__name__)
 
-# Memory Optimization: CPU single-thread limit (RAM bachaane ke liye)
+# Single thread optimization for low RAM
 opts = ort.SessionOptions()
 opts.intra_op_num_threads = 1
 opts.inter_op_num_threads = 1
 session = new_session('u2netp', providers=['CPUExecutionProvider'], sess_opts=opts)
 
-BACKGROUND_URLS = [
-    'https://images.unsplash.com/photo-1509316975850-ff9c5deb0cd9?w=512&h=512&fit=crop&fm=jpg',
-    'https://images.unsplash.com/photo-1585320806297-9794b3e4eeae?w=512&h=512&fit=crop&fm=jpg',
-    'https://images.unsplash.com/photo-1558904541-efa8c4a08931?w=512&h=512&fit=crop&fm=jpg',
-    'https://images.unsplash.com/photo-1470240731273-7821a6eeb6bd?w=512&h=512&fit=crop&fm=jpg',
-    'https://images.unsplash.com/photo-1500382017468-9049fed747ef?w=512&h=512&fit=crop&fm=jpg',
-    'https://images.unsplash.com/photo-1513836279014-a89f7a76ae86?w=512&h=512&fit=crop&fm=jpg',
-    'https://images.unsplash.com/photo-1542273917363-3b1817f69a2d?w=512&h=512&fit=crop&fm=jpg',
-    'https://images.unsplash.com/photo-1448375240586-882707db888b?w=512&h=512&fit=crop&fm=jpg',
+# Natural Field / Ground Color Themes (Offline - Zero Network Lag)
+THEMES = [
+    ((110, 139, 61), (194, 178, 128)),   # Khet Green + Mitti Ground
+    ((76, 115, 60), (142, 126, 92)),     # Forest Green + Path
+    ((130, 140, 80), (210, 180, 140)),   # Sunny Crop Field
+    ((90, 120, 70), (160, 140, 110)),    # Garden Outdoor
 ]
 
 @app.route('/')
@@ -38,29 +33,29 @@ def change_background():
         if not img_data:
             return "No data", 400
 
-        # 1. Image ko low RAM size (300px) par process karna
+        # 1. Input Image ko resize karein
         input_img = Image.open(io.BytesIO(img_data)).convert('RGB')
         small_img = input_img.resize((300, 300))
         del input_img
         gc.collect()
 
-        # 2. Fast & Light AI Cutout
+        # 2. AI Cutout
         cutout = remove(small_img, session=session).convert('RGBA')
         cutout = cutout.resize((512, 512), Image.Resampling.BILINEAR)
         del small_img
         gc.collect()
 
-        # 3. Background Download & Paste
-        bg_url = random.choice(BACKGROUND_URLS)
-        bg_resp = requests.get(bg_url, timeout=10)
-        bg_img = Image.open(io.BytesIO(bg_resp.content)).convert('RGBA').resize((512, 512))
-
-        bg_img.paste(cutout, (0, 0), cutout)
-        final_img = bg_img.convert('RGB')
-        del cutout, bg_img
+        # 3. Fast Canvas Background (No external download delay)
+        bg = Image.new('RGBA', (512, 512), (135, 206, 235, 255)) # Sky
+        draw = ImageDraw.Draw(bg)
+        draw.rectangle([0, 260, 512, 512], fill=(107, 142, 35, 255)) # Ground
+        
+        # 4. Composite & Export
+        bg.paste(cutout, (0, 0), cutout)
+        final_img = bg.convert('RGB')
+        del cutout, bg
         gc.collect()
 
-        # 4. Response Return
         out_io = io.BytesIO()
         final_img.save(out_io, format='JPEG', quality=80)
         out_io.seek(0)
