@@ -1,15 +1,14 @@
 import io
 import os
 from flask import Flask, request, send_file
-import mediapipe as mp
+from mediapipe.python.solutions import selfie_segmentation
 import numpy as np
 from PIL import Image, ImageDraw
 
 app = Flask(__name__)
 
-# MediaPipe Selfie Segmentation (RAM ~60MB, Super Fast)
-mp_selfie_segmentation = mp.solutions.selfie_segmentation
-segmentor = mp_selfie_segmentation.SelfieSegmentation(model_selection=1)
+# Direct Module Load (Zero crash & RAM ~60MB)
+segmentor = selfie_segmentation.SelfieSegmentation(model_selection=1)
 
 
 @app.route('/')
@@ -24,7 +23,7 @@ def change_background():
     if not img_data:
       return 'No image data', 400
 
-    # 1. 512x512 Resize
+    # 1. Image load
     input_image = (
         Image.open(io.BytesIO(img_data)).convert('RGB').resize((512, 512))
     )
@@ -40,7 +39,7 @@ def change_background():
     draw.rectangle([0, 260, 512, 512], fill=(107, 142, 35))
     bg_np = np.array(bg_image)
 
-    # 4. Blend Worker with Background
+    # 4. Composite Photo
     condition = np.stack((mask,) * 3, axis=-1)
     output_np = np.where(condition, img_np, bg_np)
 
