@@ -1,6 +1,5 @@
 flask
 gunicorn
-rembg[cpu]
-onnxruntime
+mediapipe
 pillow
-requests
+numpy
